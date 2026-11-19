@@ -1,22 +1,21 @@
 # Credit Default Risk Modeling
 
-An interpretable loan-default modeling pipeline that estimates probability of default (PD), benchmarks a logistic regression scorecard against XGBoost, and translates borrower characteristics into additive credit-score points.
+## Project overview
 
-The project follows the credit-model lifecycle: outcome definition, leakage filtering, temporal validation, statistical binning, Weight of Evidence (WoE), feature selection, model comparison, probability recalibration, stability analysis, and borrower scoring.
+This project builds an interpretable credit-risk scoring system using historical Lending Club loan data. It learns how loan characteristics, borrower finances, and credit-history variables relate to repayment outcomes, then uses those relationships to estimate default risk.
+
+The pipeline produces two main outputs:
+
+- **Probability of default (PD):** a model estimate of how likely a borrower is to default.
+- **Credit-score points:** an additive score assembled from feature-bin contributions, with higher scores intended to indicate lower risk.
+
+Logistic regression on Weight of Evidence (WoE) features provides the interpretable model. An XGBoost challenger tests whether nonlinear relationships and interactions improve predictive performance. The project also examines probability calibration, changes in borrower populations over time, and the factors driving model predictions.
 
 **Stack:** Python · pandas · NumPy · scikit-learn · XGBoost · SHAP · Matplotlib · Seaborn
 
-## Results
-
-| Metric | AUC |
-| --- | --- |
-| XGBoost challenger — validation | **0.74** |
-| Out-of-time performance — before recalibration | **0.69** |
-| Out-of-time performance — after recalibration | **0.72** |
-
 ## Data and prediction task
 
-The local data is a Lending Club accepted-loan sample, `data/raw/accepted_200k.csv`, containing **200,000 records and 151 original columns**. The supervised model uses **119,371 loans with resolved outcomes**.
+The dataset is a Lending Club accepted-loan sample, `data/raw/accepted_200k.csv`, containing **200,000 records and 151 original columns**. The supervised model uses **119,371 loans with resolved outcomes**.
 
 | Target | Included loan statuses |
 | --- | --- |
@@ -58,9 +57,9 @@ $$
 \mathrm{IV}=\sum_b(\mathrm{DistGood}_b-\mathrm{DistBad}_b)\mathrm{WoE}_b
 $$
 
-The implementation smooths bin counts to avoid undefined logarithms. Feature selection combines an **IV cutoff of 0.02**, manual removal of unsuitable or high-cardinality variables, and explicit drops informed by **absolute correlation above 0.90**. These correlation decisions are stored as a drop list rather than recalculated automatically by the selection script.
+The implementation smooths bin counts to avoid undefined logarithms. Feature selection combines an **IV cutoff of 0.02**, manual removal of unsuitable or high-cardinality variables, and explicit drops informed by **absolute correlation above 0.90**. The selected correlation-based removals are stored in an explicit drop list.
 
-The saved logistic model uses **34 WoE predictors**: 31 numerical and 3 categorical (`term`, `home_ownership`, and `verification_status`). Unseen categories without a training WoE mapping receive a neutral value of zero.
+The logistic model uses **34 WoE predictors**: 31 numerical and 3 categorical (`term`, `home_ownership`, and `verification_status`). Unseen categories without a training WoE mapping receive a neutral value of zero.
 
 ### 3. Train and compare models
 
@@ -85,7 +84,37 @@ $$
 \mathrm{Points}_{j,b}=-\mathrm{Factor}\,\beta_j\,\mathrm{WoE}_{j,b}
 $$
 
-The configured settings are a base score of **600**, reference good:bad odds of **4:1**, and **20 points to double the odds (PDO)**. The current borrower script starts at 600, adds the available bin points, and rounds to an integer. Score-band tables compare observed default rates across validation and OOT borrowers.
+The configured settings are a base score of **600**, reference good:bad odds of **4:1**, and **20 points to double the odds (PDO)**. The borrower-scoring script starts at 600, adds the available bin points, and rounds to an integer. Score-band tables compare observed default rates across validation and OOT borrowers.
+
+## Results
+
+| Metric | AUC |
+| --- | --- |
+| XGBoost challenger — validation | **0.74** |
+| Out-of-time performance — before recalibration | **0.69** |
+| Out-of-time performance — after recalibration | **0.72** |
+
+## Visual analysis
+### Credit-score validation
+
+The OOT score-band analysis shows lower observed default rates among borrowers with higher scores.
+
+![Observed default rate by credit-score band on OOT data](images/oot_score_band_default_rate.png)
+
+### Population stability
+
+PSI highlights changes in borrower characteristics between training and OOT populations, with the largest shifts concentrated in credit-utilization features.
+
+![Population Stability Index across the leading shifted features](images/psi_summary.png)
+
+<details>
+<summary>View XGBoost feature explanations with SHAP</summary>
+
+The SHAP summary shows feature contributions to the XGBoost model's predictions. Colors represent the WoE-transformed feature values.
+
+![XGBoost SHAP summary on the out-of-time population](images/xgboost_shap_summary.png)
+
+</details>
 
 ## Repository guide
 
@@ -99,6 +128,17 @@ The configured settings are a base score of **600**, reference good:bad odds of 
 | `outputs/` | Generated datasets, WoE tables, metrics, scorecards, and borrower scores |
 
 Raw data and generated outputs are excluded from version control. Supply the input dataset locally to regenerate the pipeline artifacts.
+
+## Outputs
+
+| Generated artifact | Contents |
+| --- | --- |
+| `final_bin_boundaries.csv`, `final_woe_iv_all.csv` | Training bin edges and WoE mappings |
+| `model_metrics.csv`, `xgboost_metrics.csv` | Model evaluation by split |
+| `calibration_summary.csv`, `recalibration_results.csv` | Probability calibration checks |
+| `psi_summary.csv`, `xgboost_shap_importance.csv` | Distribution stability and model explanations |
+| `final_scorecard.csv`, `final_bin_scorecard.csv` | Feature weights and bin points |
+| `validation_scored.csv`, `oot_scored.csv` | Borrower scores and feature point contributions |
 
 ## Run locally
 
@@ -127,15 +167,7 @@ Execute scripts in the following order. Each stage reads files produced by earli
 | Borrower scoring and score-band checks | `19_score_borrowers.py`, then `20_scorecard_validation.py` |
 | Consolidated model comparison | `21_final_model_comparison.py` |
 
-For example:
-
-```bash
-python scripts/01_inspect_data.py
-python scripts/02_prepare_data.py
-python scripts/03_select_features.py
-python scripts/04_split_data.py
-python scripts/05_missing_analysis.py
-```
+Start with `python scripts/01_inspect_data.py` and continue through the stages above.
 
 Before stage 06, remove columns that are entirely missing in training:
 
@@ -150,38 +182,3 @@ PY
 ```
 
 For borrower scoring, set the input/output paths in stages 19 and 20 to the same split: validation or OOT. Before stage 21, use `default_rate` as the default-rate column name in the model metrics table.
-
-## Outputs
-
-| Generated artifact | Contents |
-| --- | --- |
-| `final_bin_boundaries.csv`, `final_woe_iv_all.csv` | Training bin edges and WoE mappings |
-| `model_metrics.csv`, `xgboost_metrics.csv` | Model evaluation by split |
-| `calibration_summary.csv`, `recalibration_results.csv` | Probability calibration checks |
-| `psi_summary.csv`, `xgboost_shap_importance.csv` | Distribution stability and model explanations |
-| `final_scorecard.csv`, `final_bin_scorecard.csv` | Feature weights and bin points |
-| `validation_scored.csv`, `oot_scored.csv` | Borrower scores and feature point contributions |
-
-## Visual analysis
-
-### Credit-score validation
-
-The OOT score-band analysis shows lower observed default rates among borrowers with higher scores.
-
-![Observed default rate by credit-score band on OOT data](images/oot_score_band_default_rate.png)
-
-### Population stability
-
-PSI highlights changes in borrower characteristics between training and OOT populations, with the largest shifts concentrated in credit-utilization features.
-
-![Population Stability Index across the leading shifted features](images/psi_summary.png)
-
-<details>
-<summary>View XGBoost feature explanations with SHAP</summary>
-
-The SHAP summary shows feature contributions to the XGBoost model's predictions. Colors represent the WoE-transformed feature values.
-
-![XGBoost SHAP summary on the out-of-time population](images/xgboost_shap_summary.png)
-
-</details>
-
