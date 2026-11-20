@@ -91,8 +91,8 @@ The configured settings are a base score of **600**, reference good:bad odds of 
 | Metric | AUC |
 | --- | --- |
 | XGBoost challenger — validation | **0.74** |
-| Out-of-time performance — before recalibration | **0.69** |
-| Out-of-time performance — after recalibration | **0.72** |
+| Logistic model — validation | **0.72** |
+| Out-of-time performance — XGBoost | **0.69** |
 
 ## Visual analysis
 ### Credit-score validation
